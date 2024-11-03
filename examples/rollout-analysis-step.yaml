@@ -1,0 +1,39 @@
+# This example demonstrates a Rollout which starts and finishes analysis at a specific canary step
+#
+# Prerequisites:
+# kubectl apply -f analysis-templates.yaml
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: rollout-analysis-step
+spec:
+  replicas: 4
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: rollout-analysis-step
+  template:
+    metadata:
+      labels:
+        app: rollout-analysis-step
+    spec:
+      containers:
+      - name: rollouts-demo
+        image: argoproj/rollouts-demo:blue
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+  strategy:
+    canary:
+      steps:
+      - setWeight: 25
+      # An AnalysisTemplate is referenced at the second step, which starts an AnalysisRun after
+      # the setWeight step. The rollout will not progress to the following step until the
+      # AnalysisRun is complete. A failure/error of the analysis will cause the rollout's update to
+      # abort, and set the canary weight to zero.
+      - analysis:
+          templates:
+          - templateName: random-fail
+          - templateName: always-pass
+            clusterScope: true

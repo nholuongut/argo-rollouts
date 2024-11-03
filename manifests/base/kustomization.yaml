@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- argo-rollouts-sa.yaml
+- argo-rollouts-deployment.yaml
+- argo-rollouts-aggregate-roles.yaml
+- argo-rollouts-metrics-service.yaml
+- argo-rollouts-notification-secret.yaml
+- argo-rollouts-config.yaml
+images:
+- name: quay.io/nholuongut/argo-rollouts
+  newTag: latest

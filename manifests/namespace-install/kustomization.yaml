@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+- ../base
+- ../role
+
+resources:
+- argo-rollouts-rolebinding.yaml
+
+patches:
+- path: add-namespaced-flag.yaml
+
+patchesJson6902:
+- path: clusterrole-to-role.yaml
+  target:
+    group: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: argo-rollouts
+    version: v1

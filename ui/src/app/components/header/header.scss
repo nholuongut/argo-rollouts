@@ -1,0 +1,44 @@
+@import 'node_modules/argo-ui/v2/styles/colors';
+
+.rollouts-header {
+    display: flex;
+    background: #0f2733;
+    color: white;
+    align-items: center;
+    padding: 10px 0;
+
+    &__brand {
+        display: flex;
+        align-items: center;
+        text-decoration: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        margin-left: 10px;
+    }
+
+    &__title {
+        display: flex;
+        align-items: center;
+        color: white !important;
+        font-weight: 600;
+        font-size: 22px;
+        width: 200px;
+    }
+    
+    &__info {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+    }
+    &__label {
+        color: $shine;
+        margin: auto;
+        font-size: 10px;
+        font-weight: 600;
+    }
+    &__namespace {
+        margin: 0 20px;
+    }
+}

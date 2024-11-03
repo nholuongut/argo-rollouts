@@ -1,0 +1,91 @@
+---
+kind: AnalysisTemplate
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  name: echo-pod-hash
+spec:
+  args:
+  - name: latest-hash
+  - name: stable-hash
+  - name: baseline-hash
+  - name: canary-hash
+  metrics:
+  - name: echo-pod-hash
+    provider:
+      job:
+        metadata:
+          labels:
+            foo: bar
+          annotations:
+            foo2: bar2
+        spec:
+          backoffLimit: 0
+          template:
+            spec:
+              restartPolicy: Never
+              containers:
+              - name: echo-pod-hash
+                image: nginx:1.19-alpine
+                command: [sh, -c]
+                args:
+                - |
+                  echo "latest hash: $(LATEST_HASH)"
+                  echo "stable hash: $(STABLE_HASH)"
+                  echo "baseline hash: $(BASELINE_HASH)"
+                  echo "canary hash: $(CANARY_HASH)"
+                env:
+                - name: LATEST_HASH
+                  value: "{{args.latest-hash}}"
+                - name: STABLE_HASH
+                  value: "{{args.stable-hash}}"
+                - name: BASELINE_HASH
+                  value: "{{args.baseline-hash}}"
+                - name: CANARY_HASH
+                  value: "{{args.canary-hash}}"
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: rollout-experiment
+spec:
+  strategy:
+    canary:
+      steps:
+      - experiment:
+          templates:
+          - name: baseline
+            specRef: stable
+          - name: canary
+            specRef: canary
+          analyses:
+          - name : echo-pod-hash
+            templateName: echo-pod-hash
+            requiredForCompletion: true
+            args:
+            - name: stable-hash
+              valueFrom:
+                podTemplateHashValue: Stable
+            - name: latest-hash
+              valueFrom:
+                podTemplateHashValue: Latest
+            - name: baseline-hash
+              value: "{{templates.baseline.podTemplateHash}}"
+            - name: canary-hash
+              value: "{{templates.canary.podTemplateHash}}"
+      - pause: {}
+  selector:
+    matchLabels:
+      app: rollout-experiment
+  template:
+    metadata:
+      labels:
+        app: rollout-experiment
+    spec:
+      containers:
+      - name: rollouts-demo
+        image: nginx:1.19-alpine
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 5m

@@ -1,0 +1,18 @@
+kind: AnalysisRun
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  generateName: analysis-run-job-
+spec:
+  metrics:
+  - name: test
+    provider:
+      job:
+        spec:
+          template:
+            spec:
+              containers:
+              - name: sleep
+                image: nginx:1.19-alpine
+                command: [sleep, "30"]
+              restartPolicy: Never
+          backoffLimit: 0

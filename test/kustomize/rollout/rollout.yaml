@@ -1,0 +1,296 @@
+# NOTE: this rollout is invalid and is only used to test kustomize transformers
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: guestbook
+spec:
+  workloadRef:
+    kind: Deployment
+    apiVersion: apps/v1
+    name: deployment
+  selector:
+    matchLabels:
+      app: guestbook
+  template:
+    metadata:
+      labels:
+        app: guestbook
+    spec:
+      serviceAccountName: robot
+      volumes:
+      - name: config-volume
+        configMap:
+          name: guestbook-cm
+      - name: secret-volume
+        secret:
+          secretName: guestbook-secret
+      containers:
+      - name: guestbook
+        image: guestbook:v1
+        command:
+        - ping $(SERVICE_NAME)
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/config
+        - name: secret-volume
+          mountPath: /etc/secrets
+        env:
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: guestbook-secret
+              key: password
+        - name: FOO
+          valueFrom:
+            configMapKeyRef:
+              name: guestbook-cm
+              key: FOO
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: guestbook
+  strategy:
+    canary:
+      stableService: guestbook-stable-svc
+      canaryService: guestbook-canary-svc
+      trafficRouting:
+        istio:
+          virtualService:
+            name: guestbook-vsvc
+            routes:
+            - primary
+          destinationRule:
+            name: guestbook-destrule
+        nginx:
+          stableIngress: extensions-ingress
+        alb:
+          ingress: networking-ingress
+        ambassador:
+          mappings:
+          - mapping
+      analysis:
+        templates:
+        - templateName: random-fail
+      steps:
+      - experiment:
+          templates:
+          - name: canary
+            specRef: canary
+          analyses:
+          - name: random-fail
+            templateName: random-fail
+      - analysis:
+          templates:
+          - templateName: random-fail
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Experiment
+metadata:
+  name: experiment
+spec:
+  templates:
+  - name: foo
+    metadata:
+      labels:
+        app: guestbook
+    template:
+      spec:
+        serviceAccountName: robot
+        volumes:
+        - name: config-volume
+          configMap:
+            name: guestbook-cm
+        - name: secret-volume
+          secret:
+            secretName: guestbook-secret
+        containers:
+        - name: guestbook
+          image: guestbook:v1
+          command:
+          - ping $(SERVICE_NAME)
+  analyses:
+  - name: random-fail
+    templateName: random-fail
+
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: guestbook-vsvc
+spec:
+  gateways:
+  - istio-rollout-gateway
+  hosts:
+  - istio-rollout.dev.argoproj.io
+  http:
+  - name: primary
+    route:
+    - destination:
+        host: guestbook-stable-svc
+      weight: 100
+    - destination:
+        host: guestbook-canary-svc
+      weight: 0
+
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: guestbook-destrule
+spec:
+  host: guestbook
+  subsets:
+  - name: canary
+    labels:
+      app: guestbook
+  - name: stable
+    labels:
+      app: guestbook
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: guestbook-stable-svc
+spec:
+  selector:
+    app: guestbook
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: guestbook-canary-svc
+spec:
+  selector:
+    app: guestbook
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: networking-ingress
+spec:
+  rules:
+  - host: www.mysite.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: website
+            port:
+              number: 80
+
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: extensions-ingress
+spec:
+  rules:
+  - host: www.mysite.com
+    http:
+      paths:
+      - backend:
+          serviceName: website
+          servicePort: 80
+
+---
+kind: AnalysisTemplate
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  name: random-fail
+spec:
+  metrics:
+  - name: random-fail
+    interval: 5s
+    failureLimit: 1
+    provider:
+      job:
+        spec:
+          template:
+            spec:
+              serviceAccountName: robot
+              volumes:
+              - name: config-volume
+                configMap:
+                  name: guestbook-cm
+              - name: secret-volume
+                secret:
+                  secretName: guestbook-secret
+              containers:
+              - name: sleep
+                image: alpine:3.8
+                command: [ping $(SERVICE_NAME)]
+              restartPolicy: Never
+          backoffLimit: 0
+
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa
+spec:
+  minReplicas: 3
+  maxReplicas: 3
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      targetAverageUtilization: 50
+  scaleTargetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: guestbook
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: robot
+
+---
+apiVersion: getambassador.io/v2
+kind:  Mapping
+metadata:
+  name: mapping
+spec:
+  prefix: /someapp
+  rewrite: /
+  service: someapp-stable:80
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80

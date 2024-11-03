@@ -1,0 +1,112 @@
+name: Go
+on:
+  push:
+    branches:
+      - 'main'
+      - 'release-*'
+  pull_request:
+    branches:
+      - 'main'
+env:
+  # Golang version to use across CI steps
+  GOLANG_VERSION: '1.22'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-go:
+    permissions:
+      contents: read # for actions/checkout to fetch code
+      pull-requests: read # for golangci/golangci-lint-action to fetch pull requests
+    name: Lint Go code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v5.1.0
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.57.2
+          args: --timeout 6m
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v5.1.0
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
+        id: go
+
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v4
+
+      - name: Restore go build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-go-build-v1-${{ github.run_id }}
+
+      - name: Download all Go modules
+        run: |
+          go mod download
+
+      - name: Compile all packages
+        run: make controller plugin
+
+  codegen:
+    name: Verify Codegen
+    runs-on: ubuntu-latest
+    env:
+      GOPATH: /home/runner/go
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Golang
+        uses: actions/setup-go@v5.1.0
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
+      # k8s codegen generates files into GOPATH location instead of the GitHub git checkout location
+      # This symlink is necessary to ensure that `git diff` detects changes
+      - name: Create symlink in GOPATH
+        run: |
+          mkdir -p ~/go/src/github.com/argoproj
+          ln -s $(pwd) ~/go/src/github.com/nholuongut/argo-rollouts
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/go-build
+          key: GOCACHE-${{ hashFiles('**/go.mod') }}
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/go/pkg/mod
+          key: GOMODCACHE-${{ hashFiles('**/go.mod') }}
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/go/bin
+          key: go-bin-v1-${{ hashFiles('**/go.mod') }}
+      - name: Install protoc
+        run: |
+          make install-toolchain
+      - name: Add ~/go/bin to PATH
+        run: |
+          echo "/home/runner/go/bin" >> $GITHUB_PATH
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Run codegen
+        run: |
+          make go-mod-vendor
+          make codegen
+
+      - name: Ensure nothing changed
+        run: git diff --exit-code
